@@ -1,82 +1,103 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<pthread.h>
-#include<errno.h>
-#include<sys/ipc.h>
-#include<semaphore.h>
+#include <iostream>
+#include <thread>
+#include <queue>
+#include <atomic>
+#include <mutex>
+#include <unistd.h>
 
-#define N 5
+using namespace std;
+typedef long long ll;
 
-time_t end_time;/*end time*/
-sem_t mutex, customers, barbers; /*Three semaphors*/
-int count = 0; /*The number of customers waiting for haircuts*/
-
-void barber(void *arg);
-void customer(void *arg);
-
-int main(int argc, char *argv[])
+class sem 
 {
-	pthread_t id1, id2;
-	int status = 0;
-	end_time = time(NULL) + 20;/*Barber Shop Hours is 20s*/
+    private:
+		mutex m;
+		atomic<ll> val;
 
-	/*Semaphore initialization*/
-	sem_init(&mutex, 0, 1);
-	sem_init(&customers, 0, 0);
-	sem_init(&barbers, 0, 1);
+	public:
+		sem(ll init)
+		{
+            val = init;
+        }
 
-	/*Barber_thread initialization*/
-	status = pthread_create(&id1, NULL, (void *)barber, NULL);
-	if (status != 0)
-		perror("create barbers is failure!\n");
-	/*Customer_thread initialization*/
-	status = pthread_create(&id2, NULL, (void *)customer, NULL);
-	if (status != 0)
-		perror("create customers is failure!\n");
+		void wait() 
+		{
+			while (true) 
+			{
+				while (val <= 0);
+				m.lock();
+				if (val <= 0) 
+				{ 
+					m.unlock();
+					continue; 
+				}
+				val--;
+				m.unlock();
+				break;
+			}
+		}
 
-	/*Customer_thread first blocked*/
-	pthread_join(id2, NULL);
-	pthread_join(id1, NULL);
+		void signal() 
+		{
+			val++; 
+		}
+};
 
-	exit(0);
-}
+ll freeWaitingRoomSeats = 3;
+sem barberReady(1), customerReady(0), waitingRoom_m(1);
 
-void barber(void *arg)/*Barber Process*/
+void barber()
 {
-	while (time(NULL) < end_time || count > 0)
-	{
-		sem_wait(&customers);/*P(customers)*/
-		sem_wait(&mutex);/*P(mutex)*/
-		count--;
-
-		printf("Barber:cut hair,count is:%d.\n", count);
-		
-		sem_post(&mutex);/*V(mutex)*/
-		sem_post(&barbers);/*V(barbers)*/
-		sleep(3);
+	while(true)
+	{	
+		if(freeWaitingRoomSeats == 3)
+		{
+			cout<<"Barber is sleeping"<<endl;
+		}
+		customerReady.wait();
+		waitingRoom_m.wait();
+		freeWaitingRoomSeats++;
+		waitingRoom_m.signal();
+		cout<<"Cutting hair of customer"<<endl;
+		barberReady.signal();
 	}
 }
 
-void customer(void *arg)/*Customers Process*/
+void customer()
 {
-	while (time(NULL) < end_time)
+	while(true)
 	{
-		sem_wait(&mutex);/*P(mutex)*/
-		if (count < N)
+		ll x = rand()%10;
+		ll y = rand()%4;
+		sleep(y + x/10.0);
+		waitingRoom_m.wait();
+		cout<<"New customer arrived"<<endl;
+		if(freeWaitingRoomSeats > 0)
 		{
-			count++;
-		
-			printf("Customer:add count,count is:%d\n", count);
-			
-			sem_post(&mutex);/*V(mutex)*/
-			sem_post(&customer);/*V(customers)*/
-			sem_wait(&barbers);/*P(barbers)*/
+			freeWaitingRoomSeats--;
+			cout<<"Vacant seat available"<<endl;
+			customerReady.signal();
+			waitingRoom_m.signal();
+			barberReady.wait();
 		}
 		else
-			/*V(mutex)*/
-			/*If the number is full of customers,just put the mutex lock let go*/
-			sem_post(&mutex);
-		sleep(1);
+		{
+			cout<<"No available seat for the customer"<<endl;
+			waitingRoom_m.signal();
+		}
 	}
+}
+
+signed main()
+{
+	thread barb(barber);
+	thread customer1(customer);
+	thread customer2(customer);
+	thread customer3(customer);
+	thread customer4(customer);
+	barb.join();
+	customer1.join();
+	customer2.join();
+	customer3.join();
+	customer4.join();
 }
